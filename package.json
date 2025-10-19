@@ -1,7 +1,7 @@
 {
-  "name": "pdv-backend-sped-nfe",
+  "name": "pdv-backend-node-sped",
   "version": "1.0.0",
-  "description": "Backend para o sistema PDV com a biblioteca @sped-nfe/nfe-brasil.",
+  "description": "Backend para o sistema PDV com a biblioteca node-sped-nfe.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -13,6 +13,6 @@
     "cors": "^2.8.5",
     "express": "^4.19.2",
     "pg": "^8.11.3",
-    "@sped-nfe/nfe-brasil": "^1.11.3"
+    "node-sped-nfe": "^1.0.63"
   }
 }

@@ -2,7 +2,7 @@
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
-const { Configuracao, NFe, Impressao } = require('@sped-nfe/nfe-brasil'); // A biblioteca correta e moderna
+const NFe = require('node-sped-nfe'); // A biblioteca correta que você sugeriu
 const fs = require('fs');
 
 const app = express();
@@ -47,94 +47,78 @@ app.post('/api/emitir-nfce', async (req, res) => {
         const senha = process.env.CERTIFICATE_PASSWORD;
 
         // 2. Configurar a instância da NFe
-        const config = new Configuracao({
-            empresa: {
-                cnpj: process.env.EMIT_CNPJ,
-                razaoSocial: process.env.EMIT_RAZAO_SOCIAL,
-                inscricaoEstadual: process.env.EMIT_IE,
-                endereco: {
-                    logradouro: process.env.EMIT_LOGRADOURO,
-                    numero: process.env.EMIT_NUMERO,
-                    bairro: process.env.EMIT_BAIRRO,
-                    municipio: process.env.EMIT_MUNICIPIO,
-                    uf: process.env.EMIT_UF,
-                    cep: process.env.EMIT_CEP,
-                    codigoMunicipio: process.env.EMIT_MUN_CODE,
-                },
+        const nfe = new NFe({
+            "empresa": {
+                "razaoSocial": process.env.EMIT_RAZAO_SOCIAL,
+                "cnpj": process.env.EMIT_CNPJ,
+                "uf": process.env.EMIT_UF,
+                "inscricaoEstadual": process.env.EMIT_IE,
+                "codigoRegimeTributario": 1, // 1=Simples Nacional
+                "endereco": {
+                    "logradouro": process.env.EMIT_LOGRADOURO,
+                    "numero": process.env.EMIT_NUMERO,
+                    "bairro": process.env.EMIT_BAIRRO,
+                    "cidade": process.env.EMIT_MUNICIPIO,
+                    "cep": process.env.EMIT_CEP,
+                    "codigoCidade": process.env.EMIT_MUN_CODE
+                }
             },
-            certificado: { pfx, senha },
-            producao: false, // false = Homologação (testes)
-            codigoSegurancaContribuinte: {
-                id: process.env.CSC_ID,
-                csc: process.env.CSC_TOKEN,
-            },
-            impressao: {
-                tipo: Impressao.Tipo.NFCe,
-            },
+            "producao": false, // false = Homologação (testes)
+            "certificado": { "pfx": pfx, "senha": senha },
+            "codigoSeguranca": {
+                "id": process.env.CSC_ID,
+                "csc": process.env.CSC_TOKEN
+            }
         });
 
-        const nfe = new NFe(config);
-        
         // 3. Montar os dados da nota
         const numeroNFe = Math.floor(Math.random() * 100000) + 1; // Em um sistema real, seria sequencial
-        const corpoNFe = {
-            cabecalho: {
-                codigoUF: process.env.EMIT_UF_CODE,
-                naturezaOperacao: 'VENDA',
-                modelo: '65',
-                serie: 1,
-                numero: numeroNFe,
-                dataEmissao: new Date(),
-                tipo: '1', // 1=Saída
-                municipioOcorrencia: process.env.EMIT_MUN_CODE,
-                finalidade: '1', // 1=NF-e normal
-                consumidorFinal: '1',
-                presencaConsumidor: '1', // 1=Operação presencial
-            },
-            emitente: {}, // Os dados já estão na configuração
-            destinatario: {
-                 nome: 'NF-E EMITIDA EM AMBIENTE DE HOMOLOGACAO - SEM VALOR FISCAL'
-            },
-            produtos: itens.map((item, index) => ({
-                numeroItem: index + 1,
-                codigo: item.codigo,
-                descricao: item.nome,
-                ncm: '22021000', // ATENÇÃO: Usar o NCM correto de cada produto
-                cfop: '5102',
-                unidadeComercial: 'UN',
-                quantidadeComercial: item.quantidade,
-                valorUnitarioComercial: item.preco,
-                unidadeTributavel: 'UN',
-                quantidadeTributavel: item.quantidade,
-                valorUnitarioTributavel: item.preco,
-                icms: {
-                    origem: '0', // Nacional
-                    csosn: '102', // Tributada pelo Simples Nacional sem permissão de crédito
-                },
-                pis: { cst: '07' },
-                cofins: { cst: '07' },
-            })),
-            pagamento: [{
-                forma: '01', // 01=Dinheiro
-                valor: valorPago,
-            }],
-        };
+        nfe.setInformacoesGerais({
+            "modelo": "65", // 65=NFC-e
+            "naturezaOperacao": "VENDA",
+            "dataEmissao": new Date(),
+            "finalidade": "1",
+            "consumidorFinal": true,
+            "presenca": "1",
+            "tipo": "1",
+            "numero": numeroNFe,
+            "serie": 1
+        });
 
-        // 4. Envia a nota para a SEFAZ
-        const resultado = await nfe.enviar(corpoNFe);
+        nfe.setDestinatario({ "nome": "CONSUMIDOR FINAL" });
+
+        itens.forEach(item => {
+            nfe.adicionarProduto({
+                "codigo": item.codigo,
+                "descricao": item.nome,
+                "ncm": "22021000", // ATENÇÃO: Usar o NCM correto
+                "cfop": "5102",
+                "unidade": "UN",
+                "quantidade": item.quantidade,
+                "valor": item.preco,
+                "icms": { "origem": "0", "csosn": "102" },
+                "pis": { "cst": "07" },
+                "cofins": { "cst": "07" }
+            });
+        });
         
-        if (resultado.retorno.autorizado) {
+        nfe.adicionarPagamento({ "forma": "01", "valor": valorPago });
+        
+        // 4. Envia a nota para a SEFAZ
+        const resultado = await nfe.enviarNFe();
+
+        if (resultado.cStat === '100') { // 100 = Autorizado o uso da NF-e
              res.status(200).json({
                 status: 'autorizada',
                 message: 'NFC-e emitida com sucesso em ambiente de homologação!',
-                protocolo: resultado.retorno.protocolo,
+                protocolo: resultado.nProt,
                 xml: resultado.xml,
             });
         } else {
              res.status(400).json({
                 status: 'rejeitada',
                 message: 'NFC-e foi rejeitada pela SEFAZ.',
-                detalhes: resultado.retorno.motivo,
+                detalhes: resultado.xMotivo,
             });
         }
     } catch (error) {
