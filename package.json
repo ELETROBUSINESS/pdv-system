@@ -1,7 +1,7 @@
 {
   "name": "pdv-backend-render-postgres",
   "version": "1.0.0",
-  "description": "Backend para o sistema PDV com PostgreSQL.",
+  "description": "Backend para o sistema PDV com PostgreSQL e NFC-e.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -12,6 +12,7 @@
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^4.19.2",
-    "pg": "^8.11.3"
+    "pg": "^8.11.3",
+    "node-dfe": "^3.0.0"
   }
 }
