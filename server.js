@@ -92,8 +92,18 @@ app.post('/api/emitir-nfce', async (req, res) => {
              res.status(400).json({ status: 'rejeitada', message: 'NFC-e rejeitada.', detalhes: resultado.xMotivo });
         }
     } catch (error) {
-        console.error('--- ERRO AO EMITIR NFC-e ---', error);
-        res.status(500).json({ status: 'erro', message: 'Falha crítica ao emitir NFC-e.', detalhes: error.message });
+        // --- LOG DE ERRO MELHORADO ---
+        console.error('--- ERRO CRÍTICO AO TENTAR EMITIR NFC-e ---');
+        console.error('Timestamp:', new Date().toISOString());
+        // A biblioteca pode retornar o erro de formas diferentes, vamos tentar capturar todas
+        console.error('Detalhes do Erro:', error.message || error);
+        console.error('Stack do Erro:', error.stack);
+        
+        res.status(500).json({
+            status: 'erro',
+            message: 'Falha crítica no servidor ao tentar emitir NFC-e.',
+            detalhes: error.message || 'Erro desconhecido. Verifique os logs do servidor.'
+        });
     }
 });
 
