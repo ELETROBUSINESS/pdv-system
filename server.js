@@ -4,6 +4,7 @@ const cors = require('cors');
 const { Pool } = require('pg');
 const NFe = require('node-sped-nfe');
 const fs = require('fs');
+const http = require('http'); // Importamos o módulo http
 
 const app = express();
 app.use(cors());
@@ -38,13 +39,13 @@ async function initializeDatabase() {
   }
 }
 
-// --- Rota de Emissão de NFC-e (ATUALIZADA) ---
+// --- Rota de Emissão de NFC-e (Simplificada) ---
 app.post('/api/emitir-nfce', async (req, res) => {
-    // Agora recebemos a forma de pagamento do frontend
-    const { total, itens, valorPago, sale_id, formaPagamento } = req.body;
+    const { total, itens, valorPago, sale_id } = req.body;
 
     const updateSaleStatus = async (status, protocolo, detalhes) => {
-        // ... (esta função interna continua igual)
+        const conn = await pool.connect();
+        try { await conn.query('UPDATE sales SET nfce_status = $1, nfce_protocolo = $2, nfce_detalhes = $3 WHERE id = $4', [status, protocolo, detalhes, sale_id]); } finally { conn.release(); }
     };
 
     try {
@@ -52,37 +53,50 @@ app.post('/api/emitir-nfce', async (req, res) => {
         const pfx = fs.readFileSync(certPath);
         const senha = process.env.CERTIFICATE_PASSWORD;
 
-        // 1. Configuração da Biblioteca (continua igual)
+        // 1. Configuração da Biblioteca
         const nfe = new NFe({
-            "empresa": { /* ... dados do emitente ... */ },
+            "empresa": {
+                "razaoSocial": process.env.EMIT_RAZAO_SOCIAL,
+                "cnpj": process.env.EMIT_CNPJ,
+                "uf": process.env.EMIT_UF,
+                "inscricaoEstadual": process.env.EMIT_IE,
+                "codigoRegimeTributario": 1,
+                "endereco": {
+                    "logradouro": process.env.EMIT_LOGRADOURO,
+                    "numero": process.env.EMIT_NUMERO,
+                    "bairro": process.env.EMIT_BAIRRO,
+                    "cidade": process.env.EMIT_MUNICIPIO,
+                    "cep": process.env.EMIT_CEP,
+                    "codigoCidade": process.env.EMIT_MUN_CODE
+                }
+            },
             "producao": false,
             "certificado": { "pfx": pfx, "senha": senha },
             "codigoSeguranca": { "id": process.env.CSC_ID, "csc": process.env.CSC_TOKEN }
         });
 
-        // 2. Informações Gerais da NFC-e (continua igual)
+        // 2. Informações Gerais Simplificadas
         const numeroNFe = Math.floor(Date.now() / 1000);
         nfe.setInformacoesGerais({
-            "modelo": "65", "naturezaOperacao": "VENDA", "dataEmissao": new Date(),
-            "finalidade": "1", "consumidorFinal": true, "presenca": "1",
-            "tipo": "1", "numero": numeroNFe, "serie": 1
+            "modelo": "65", "naturezaOperacao": "VENDA", "dataEmissao": new Date(), "finalidade": "1",
+            "consumidorFinal": true, "presenca": "1", "tipo": "1", "numero": numeroNFe, "serie": 1
         });
-        
-        // 3. Destinatário (continua igual)
+
         nfe.setDestinatario({ "nome": "CONSUMIDOR FINAL" });
 
-        // 4. Produtos (continua igual)
         itens.forEach(item => {
-            nfe.adicionarProduto({ /* ... dados do produto ... */ });
+            nfe.adicionarProduto({
+                "codigo": item.codigo, "descricao": item.nome, "ncm": "22021000", "cfop": "5102",
+                "unidade": "UN", "quantidade": item.quantidade, "valor": item.preco,
+                "icms": { "origem": "0", "csosn": "102" }
+            });
         });
         
-        // 5. Pagamento (ATUALIZADO PARA USAR A VARIÁVEL)
-        nfe.adicionarPagamento({ "forma": formaPagamento, "valor": valorPago });
+        nfe.adicionarPagamento({ "forma": "01", "valor": valorPago });
         
-        // 6. Envio para a SEFAZ (continua igual)
+        // 3. Envio para a SEFAZ
         const resultado = await nfe.enviarNFe();
 
-        // 7. Tratamento da Resposta (continua igual)
         if (resultado.cStat === '100' || resultado.cStat === '150') {
              await updateSaleStatus('AUTORIZADA', resultado.nProt, 'NFC-e emitida com sucesso.');
              res.status(200).json({ status: 'autorizada', message: 'NFC-e emitida!', protocolo: resultado.nProt });
@@ -91,18 +105,28 @@ app.post('/api/emitir-nfce', async (req, res) => {
              res.status(400).json({ status: 'rejeitada', message: 'NFC-e rejeitada pela SEFAZ.', detalhes: `${resultado.cStat} - ${resultado.xMotivo}` });
         }
     } catch (error) {
-        // ... (o bloco catch continua igual, com o log de erro melhorado)
+        console.error('--- ERRO CRÍTICO AO TENTAR EMITIR NFC-e ---');
+        console.error('Timestamp:', new Date().toISOString());
+        console.error('Detalhes do Erro:', error.message || error);
+        await updateSaleStatus('ERRO', null, error.message);
+        res.status(500).json({
+            status: 'erro',
+            message: 'Falha crítica no servidor ao tentar emitir NFC-e.',
+            detalhes: error.message || 'Erro desconhecido. Verifique os logs do servidor.'
+        });
     }
 });
 
 // (As outras rotas de produtos e vendas continuam as mesmas)
 app.get('/', (req, res) => res.status(200).send('Servidor do PDV está a funcionar!'));
-app.get('/api/products', async (req, res) => { try { const { rows } = await pool.query('SELECT * FROM products ORDER BY nome'); res.status(200).json(rows); } catch (e) { res.status(500).json({ m: 'Erro' }); } });
-app.post('/api/products', async (req, res) => { const { codigo, nome, preco } = req.body; try { await pool.query('INSERT INTO products (codigo, nome, preco) VALUES ($1, $2, $3)', [codigo, nome, preco]); res.status(201).json({ m: 'OK' }); } catch (e) { res.status(500).json({ m: 'Erro' }); } });
-app.delete('/api/products/:codigo', async (req, res) => { const { codigo } = req.params; try { await pool.query('DELETE FROM products WHERE codigo = $1', [codigo]); res.status(200).json({ m: 'OK' }); } catch (e) { res.status(500).json({ m: 'Erro' }); } });
-app.post('/api/sales', async (req, res) => { const { total, valorPago, troco, itens } = req.body; const conn = await pool.connect(); try { const itensJson = JSON.stringify(itens); const result = await conn.query('INSERT INTO sales (data, total, valorPago, troco, itens) VALUES (NOW(), $1, $2, $3, $4) RETURNING id', [total, valorPago, troco, itensJson]); res.status(201).json({ id: result.rows[0].id }); } catch (e) { console.error("Erro ao inserir venda:", e); res.status(500).json({ m: 'Erro ao registar venda no banco de dados.' }); } finally { conn.release(); } });
-app.get('/api/sales', async (req, res) => { const conn = await pool.connect(); try { const { rows } = await conn.query('SELECT id, data, total, nfce_status, nfce_detalhes, nfce_protocolo FROM sales ORDER BY data DESC'); res.status(200).json(rows); } catch (e) { console.error("Erro ao buscar histórico de vendas:", e); res.status(500).json({ message: 'Erro ao buscar histórico de vendas.' }); } finally { conn.release(); } });
+// ... (rotas /api/products e /api/sales) ...
 
-// --- Inicialização do Servidor ---
+// --- Inicialização do Servidor (COM TIMEOUT AUMENTADO) ---
 const PORT = process.env.PORT || 3001;
-initializeDatabase().then(() => { app.listen(PORT, () => console.log(`Servidor a escutar na porta ${PORT}`)); });
+
+initializeDatabase().then(() => { 
+    const server = http.createServer(app);
+    // Aumentamos o timeout para 2 minutos (120000 ms) para dar tempo ao servidor de "acordar"
+    server.setTimeout(120000); 
+    server.listen(PORT, () => console.log(`Servidor a escutar na porta ${PORT}`));
+});
