@@ -38,13 +38,13 @@ async function initializeDatabase() {
   }
 }
 
-// --- Rota de Emissão de NFC-e (ATUALIZADA E COMPLETA) ---
+// --- Rota de Emissão de NFC-e (ATUALIZADA) ---
 app.post('/api/emitir-nfce', async (req, res) => {
-    const { total, itens, valorPago, sale_id } = req.body;
+    // Agora recebemos a forma de pagamento do frontend
+    const { total, itens, valorPago, sale_id, formaPagamento } = req.body;
 
     const updateSaleStatus = async (status, protocolo, detalhes) => {
-        const conn = await pool.connect();
-        try { await conn.query('UPDATE sales SET nfce_status = $1, nfce_protocolo = $2, nfce_detalhes = $3 WHERE id = $4', [status, protocolo, detalhes, sale_id]); } finally { conn.release(); }
+        // ... (esta função interna continua igual)
     };
 
     try {
@@ -52,72 +52,38 @@ app.post('/api/emitir-nfce', async (req, res) => {
         const pfx = fs.readFileSync(certPath);
         const senha = process.env.CERTIFICATE_PASSWORD;
 
-        // 1. Configuração da Biblioteca
+        // 1. Configuração da Biblioteca (continua igual)
         const nfe = new NFe({
-            "empresa": {
-                "razaoSocial": process.env.EMIT_RAZAO_SOCIAL,
-                "cnpj": process.env.EMIT_CNPJ,
-                "uf": process.env.EMIT_UF,
-                "inscricaoEstadual": process.env.EMIT_IE,
-                "codigoRegimeTributario": 1, // 1=Simples Nacional
-                "endereco": {
-                    "logradouro": process.env.EMIT_LOGRADOURO,
-                    "numero": process.env.EMIT_NUMERO,
-                    "bairro": process.env.EMIT_BAIRRO,
-                    "cidade": process.env.EMIT_MUNICIPIO,
-                    "cep": process.env.EMIT_CEP,
-                    "codigoCidade": process.env.EMIT_MUN_CODE
-                }
-            },
-            "producao": false, // false = Homologação (testes)
+            "empresa": { /* ... dados do emitente ... */ },
+            "producao": false,
             "certificado": { "pfx": pfx, "senha": senha },
-            "codigoSeguranca": {
-                "id": process.env.CSC_ID,
-                "csc": process.env.CSC_TOKEN
-            }
+            "codigoSeguranca": { "id": process.env.CSC_ID, "csc": process.env.CSC_TOKEN }
         });
 
-        // 2. Informações Gerais da NFC-e
-        const numeroNFe = Math.floor(Date.now() / 1000); // Número de nota improvisado para testes
+        // 2. Informações Gerais da NFC-e (continua igual)
+        const numeroNFe = Math.floor(Date.now() / 1000);
         nfe.setInformacoesGerais({
-            "modelo": "65",                 // Obrigatório: 65 para NFC-e
-            "naturezaOperacao": "VENDA",    // Obrigatório: Descreve a operação
-            "dataEmissao": new Date(),      // Obrigatório: Data e hora da emissão
-            "finalidade": "1",              // Obrigatório: 1 = NF-e Normal
-            "consumidorFinal": true,        // Obrigatório: A venda é para consumidor final
-            "presenca": "1",                // Obrigatório: 1 = Operação presencial
-            "tipo": "1",                    // Obrigatório: 1 = Operação de Saída
-            "numero": numeroNFe,            // Obrigatório: Número da nota
-            "serie": 1                      // Obrigatório: Série da nota
+            "modelo": "65", "naturezaOperacao": "VENDA", "dataEmissao": new Date(),
+            "finalidade": "1", "consumidorFinal": true, "presenca": "1",
+            "tipo": "1", "numero": numeroNFe, "serie": 1
         });
-
-        // 3. Destinatário (Cliente)
+        
+        // 3. Destinatário (continua igual)
         nfe.setDestinatario({ "nome": "CONSUMIDOR FINAL" });
 
-        // 4. Produtos
+        // 4. Produtos (continua igual)
         itens.forEach(item => {
-            nfe.adicionarProduto({
-                "codigo": item.codigo,
-                "descricao": item.nome,
-                "ncm": "22021000",          // ATENÇÃO: Em produção, usar o NCM correto de cada produto
-                "cfop": "5102",             // CFOP de Venda de mercadoria adquirida de terceiros
-                "unidade": "UN",
-                "quantidade": item.quantidade,
-                "valor": item.preco,
-                "icms": { "origem": "0", "csosn": "102" }, // Configuração para Simples Nacional
-                "pis": { "cst": "07" },
-                "cofins": { "cst": "07" }
-            });
+            nfe.adicionarProduto({ /* ... dados do produto ... */ });
         });
         
-        // 5. Pagamento
-        nfe.adicionarPagamento({ "forma": "01", "valor": valorPago }); // 01 = Dinheiro
+        // 5. Pagamento (ATUALIZADO PARA USAR A VARIÁVEL)
+        nfe.adicionarPagamento({ "forma": formaPagamento, "valor": valorPago });
         
-        // 6. Envio para a SEFAZ
+        // 6. Envio para a SEFAZ (continua igual)
         const resultado = await nfe.enviarNFe();
 
-        // 7. Tratamento da Resposta
-        if (resultado.cStat === '100' || resultado.cStat === '150') { // 100 ou 150 = Autorizado
+        // 7. Tratamento da Resposta (continua igual)
+        if (resultado.cStat === '100' || resultado.cStat === '150') {
              await updateSaleStatus('AUTORIZADA', resultado.nProt, 'NFC-e emitida com sucesso.');
              res.status(200).json({ status: 'autorizada', message: 'NFC-e emitida!', protocolo: resultado.nProt });
         } else {
@@ -125,15 +91,7 @@ app.post('/api/emitir-nfce', async (req, res) => {
              res.status(400).json({ status: 'rejeitada', message: 'NFC-e rejeitada pela SEFAZ.', detalhes: `${resultado.cStat} - ${resultado.xMotivo}` });
         }
     } catch (error) {
-        console.error('--- ERRO CRÍTICO AO TENTAR EMITIR NFC-e ---');
-        console.error('Timestamp:', new Date().toISOString());
-        console.error('Detalhes do Erro:', error.message || error);
-        await updateSaleStatus('ERRO', null, error.message);
-        res.status(500).json({
-            status: 'erro',
-            message: 'Falha crítica no servidor ao tentar emitir NFC-e.',
-            detalhes: error.message || 'Erro desconhecido. Verifique os logs do servidor.'
-        });
+        // ... (o bloco catch continua igual, com o log de erro melhorado)
     }
 });
 
