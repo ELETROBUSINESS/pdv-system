@@ -9,7 +9,7 @@ app.use(cors());
 app.use(express.json());
 
 // --- Conexão com o Banco de Dados Neon ---
-// O Pool irá usar a variável de ambiente DATABASE_URL que vamos configurar no Render
+// O Pool irá usar a variável de ambiente DATABASE_URL que configurámos no Render
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: {
