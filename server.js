@@ -9,16 +9,20 @@ app.use(cors());
 app.use(express.json());
 
 // --- Conexão com o Banco de Dados Neon ---
-// O Pool irá usar a variável de ambiente DATABASE_URL que configurámos no Render
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false
-  }
-});
+let pool;
+try {
+  pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: {
+      rejectUnauthorized: false
+    }
+  });
+} catch (error) {
+    console.error("Erro ao criar o Pool de conexão:", error);
+    process.exit(1);
+}
 
 // --- Inicialização das Tabelas ---
-// Função que cria as tabelas se elas não existirem
 async function initializeDatabase() {
   try {
     const createTablesQuery = `
@@ -66,7 +70,6 @@ app.post('/api/products', async (req, res) => {
     return res.status(400).json({ message: 'Dados do produto incompletos ou inválidos.' });
   }
   try {
-    // Usamos $1, $2, etc. para segurança (evitar SQL Injection)
     await pool.query('INSERT INTO products (codigo, nome, preco) VALUES ($1, $2, $3)', [codigo, nome, preco]);
     res.status(201).json({ message: 'Produto criado com sucesso.' });
   } catch (error) {
@@ -89,6 +92,7 @@ app.delete('/api/products/:codigo', async (req, res) => {
   }
 });
 
+// Rota de Vendas ATUALIZADA com melhor log de erros
 app.post('/api/sales', async (req, res) => {
   const { total, valorPago, troco, itens } = req.body;
   if (total === undefined || valorPago === undefined || !itens) {
@@ -96,12 +100,19 @@ app.post('/api/sales', async (req, res) => {
   }
   try {
     const dataVenda = new Date();
+    // A biblioteca 'pg' lida com a conversão do array 'itens' para JSONB automaticamente.
     await pool.query('INSERT INTO sales (data, total, valorPago, troco, itens) VALUES ($1, $2, $3, $4, $5)', 
       [dataVenda, total, valorPago, troco, itens]);
     res.status(201).json({ message: 'Venda registada com sucesso.' });
   } catch (error) {
-    console.error('Erro ao registar venda:', error);
-    res.status(500).json({ message: 'Erro interno ao registar a venda.' });
+    console.error('--- DETALHES DO ERRO AO REGISTAR VENDA ---');
+    console.error('Timestamp:', new Date().toISOString());
+    console.error('Dados recebidos (body):', req.body);
+    console.error('Erro completo:', error);
+    res.status(500).json({ 
+        message: 'Erro interno no servidor ao registar a venda.',
+        error: error.message
+    });
   }
 });
 
