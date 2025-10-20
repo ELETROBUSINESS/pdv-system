@@ -2,7 +2,7 @@
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
-// --- FORMA CORRETA DE IMPORTAR ---
+// --- A forma correta de importar a classe principal ---
 const { NFe } = require('node-sped-nfe'); 
 const fs = require('fs');
 
@@ -62,7 +62,10 @@ app.post('/api/emitir-nfce', async (req, res) => {
         const nfe = new NFe();
         nfe.configure({
             "empresa": { "razaoSocial": process.env.EMIT_RAZAO_SOCIAL, "cnpj": process.env.EMIT_CNPJ, "uf": process.env.EMIT_UF, "inscricaoEstadual": process.env.EMIT_IE, "codigoRegimeTributario": 1, "endereco": { "logradouro": process.env.EMIT_LOGRADOURO, "numero": process.env.EMIT_NUMERO, "bairro": process.env.EMIT_BAIRRO, "cidade": process.env.EMIT_MUNICIPIO, "cep": process.env.EMIT_CEP, "codigoCidade": process.env.EMIT_MUN_CODE }},
-            "producao": false, "certificado": { "pfx": pfx, "senha": senha }, "codigoSeguranca": { "id": process.env.CSC_ID, "csc": process.env.CSC_TOKEN }, "informacoesAdicionais": "DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL."
+            "producao": false, 
+            "certificado": { "pfx": pfx, "senha": senha },
+            "codigoSeguranca": { "id": process.env.CSC_ID, "csc": process.env.CSC_TOKEN },
+            "informacoesAdicionais": "DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL."
         });
 
         const numeroNFe = Math.floor(Date.now() / 1000); 
@@ -83,8 +86,10 @@ app.post('/api/emitir-nfce', async (req, res) => {
     } catch (error) {
         console.error('--- ERRO CRÍTICO AO TENTAR EMITIR NFC-e ---');
         console.error(error); 
+        
         let errorMessage = 'Erro desconhecido. Verifique os logs do servidor.';
         if (error.message) { errorMessage = error.message; } else if (typeof error === 'string') { errorMessage = error; }
+
         await updateSaleStatus('ERRO', null, errorMessage);
         res.status(500).json({ status: 'erro', message: 'Falha crítica no servidor ao tentar emitir NFC-e.', detalhes: errorMessage });
     }
