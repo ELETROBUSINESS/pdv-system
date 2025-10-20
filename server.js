@@ -2,8 +2,8 @@
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
-// --- A forma correta de importar a classe principal ---
-const { NFe } = require('node-sped-nfe'); 
+// --- A FORMA CORRETA DE IMPORTAR ---
+const NFe = require('node-sped-nfe'); 
 const fs = require('fs');
 
 const app = express();
@@ -86,10 +86,8 @@ app.post('/api/emitir-nfce', async (req, res) => {
     } catch (error) {
         console.error('--- ERRO CRÍTICO AO TENTAR EMITIR NFC-e ---');
         console.error(error); 
-        
         let errorMessage = 'Erro desconhecido. Verifique os logs do servidor.';
         if (error.message) { errorMessage = error.message; } else if (typeof error === 'string') { errorMessage = error; }
-
         await updateSaleStatus('ERRO', null, errorMessage);
         res.status(500).json({ status: 'erro', message: 'Falha crítica no servidor ao tentar emitir NFC-e.', detalhes: errorMessage });
     }
