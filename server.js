@@ -2,7 +2,9 @@
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
-const NFe = require('node-sped-nfe');
+// --- ALTERAÇÃO IMPORTANTE AQUI ---
+// A forma correta de importar a classe principal
+const { NFe } = require('node-sped-nfe'); 
 const fs = require('fs');
 
 const app = express();
@@ -38,7 +40,7 @@ async function initializeDatabase() {
   }
 }
 
-// --- Rota de Emissão de NFC-e (ATUALIZADA E COMPLETA) ---
+// --- Rota de Emissão de NFC-e ---
 app.post('/api/emitir-nfce', async (req, res) => {
     const { total, itens, valorPago, sale_id, formaPagamento } = req.body;
 
@@ -48,57 +50,42 @@ app.post('/api/emitir-nfce', async (req, res) => {
     };
 
     try {
+        console.log("Iniciando emissão de NFC-e...");
         const certPath = '/etc/secrets/certificado.pfx';
         const pfx = fs.readFileSync(certPath);
         const senha = process.env.CERTIFICATE_PASSWORD;
+        console.log("Certificado lido com sucesso.");
 
-        // 1. Configuração completa da biblioteca
-        const nfe = new NFe({
+        // --- ALTERAÇÃO IMPORTANTE AQUI ---
+        // A forma correta de instanciar o objeto
+        const nfe = new NFe();
+        
+        // A configuração é passada através de um método, e não no construtor
+        nfe.configure({
             "empresa": {
                 "razaoSocial": process.env.EMIT_RAZAO_SOCIAL,
                 "cnpj": process.env.EMIT_CNPJ,
                 "uf": process.env.EMIT_UF,
                 "inscricaoEstadual": process.env.EMIT_IE,
-                "codigoRegimeTributario": 1, // 1=Simples Nacional
-                "endereco": {
-                    "logradouro": process.env.EMIT_LOGRADOURO,
-                    "numero": process.env.EMIT_NUMERO,
-                    "bairro": process.env.EMIT_BAIRRO,
-                    "cidade": process.env.EMIT_MUNICIPIO,
-                    "cep": process.env.EMIT_CEP,
-                    "codigoCidade": process.env.EMIT_MUN_CODE
-                }
+                "codigoRegimeTributario": 1, 
+                "endereco": { "logradouro": process.env.EMIT_LOGRADOURO, "numero": process.env.EMIT_NUMERO, "bairro": process.env.EMIT_BAIRRO, "cidade": process.env.EMIT_MUNICIPIO, "cep": process.env.EMIT_CEP, "codigoCidade": process.env.EMIT_MUN_CODE }
             },
-            "producao": false, // false = Homologação (testes)
+            "producao": false, 
             "certificado": { "pfx": pfx, "senha": senha },
-            "codigoSeguranca": {
-                "id": process.env.CSC_ID,
-                "csc": process.env.CSC_TOKEN
-            },
-            "informacoesAdicionais": "DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL. NAO GERA DIREITO A CREDITO FISCAL DE IPI."
+            "codigoSeguranca": { "id": process.env.CSC_ID, "csc": process.env.CSC_TOKEN },
+            "informacoesAdicionais": "DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL."
         });
-
-        // 2. Informações Gerais da NFC-e
+        console.log("Configuração da NFe criada.");
+        
         const numeroNFe = Math.floor(Date.now() / 1000); 
-        nfe.setInformacoesGerais({
-            "modelo": "65", "naturezaOperacao": "VENDA", "dataEmissao": new Date(), "finalidade": "1",
-            "consumidorFinal": true, "presenca": "1", "tipo": "1", "numero": numeroNFe, "serie": 1
-        });
-
+        nfe.setInformacoesGerais({ "modelo": "65", "naturezaOperacao": "VENDA", "dataEmissao": new Date(), "finalidade": "1", "consumidorFinal": true, "presenca": "1", "tipo": "1", "numero": numeroNFe, "serie": 1 });
         nfe.setDestinatario({ "nome": "CONSUMIDOR FINAL" });
-
-        itens.forEach(item => {
-            nfe.adicionarProduto({
-                "codigo": item.codigo, "descricao": item.nome, "ncm": "22021000", "cfop": "5102",
-                "unidade": "UN", "quantidade": item.quantidade, "valor": item.preco,
-                "icms": { "origem": "0", "csosn": "102" }, "pis": { "cst": "07" }, "cofins": { "cst": "07" }
-            });
-        });
-        
+        itens.forEach(item => { nfe.adicionarProduto({ "codigo": item.codigo, "descricao": item.nome, "ncm": "22021000", "cfop": "5102", "unidade": "UN", "quantidade": item.quantidade, "valor": item.preco, "icms": { "origem": "0", "csosn": "102" }, "pis": { "cst": "07" }, "cofins": { "cst": "07" } }); });
         nfe.adicionarPagamento({ "forma": formaPagamento, "valor": valorPago });
+        console.log("Dados da nota montados. A enviar para a SEFAZ...");
         
-        // 3. Envio para a SEFAZ com Timeout
-        const resultado = await nfe.enviarNFe({ timeout: 30000 }); // Timeout de 30 segundos
+        const resultado = await nfe.enviarNFe({ timeout: 30000 });
+        console.log("Resposta da SEFAZ recebida:", resultado);
 
         if (resultado.cStat === '100' || resultado.cStat === '150') { 
              await updateSaleStatus('AUTORIZADA', resultado.nProt, 'NFC-e emitida com sucesso.');
@@ -109,14 +96,13 @@ app.post('/api/emitir-nfce', async (req, res) => {
         }
     } catch (error) {
         console.error('--- ERRO CRÍTICO AO TENTAR EMITIR NFC-e ---');
-        console.error('Timestamp:', new Date().toISOString());
-        console.error('Detalhes do Erro:', error.message || error);
-        await updateSaleStatus('ERRO', null, error.message);
-        res.status(500).json({
-            status: 'erro',
-            message: 'Falha crítica no servidor ao tentar emitir NFC-e.',
-            detalhes: error.message || 'Erro desconhecido. Verifique os logs do servidor.'
-        });
+        console.error(error); 
+        
+        let errorMessage = 'Erro desconhecido. Verifique os logs do servidor.';
+        if (error.message) { errorMessage = error.message; } else if (typeof error === 'string') { errorMessage = error; }
+
+        await updateSaleStatus('ERRO', null, errorMessage);
+        res.status(500).json({ status: 'erro', message: 'Falha crítica no servidor ao tentar emitir NFC-e.', detalhes: errorMessage });
     }
 });
 
