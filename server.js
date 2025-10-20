@@ -2,7 +2,8 @@
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
-const { NFe } = require('node-sped-nfe');
+// --- FORMA CORRETA DE IMPORTAR ---
+const { NFe } = require('node-sped-nfe'); 
 const fs = require('fs');
 
 const app = express();
@@ -38,7 +39,7 @@ async function initializeDatabase() {
   }
 }
 
-// --- Rota de Emissão de NFC-e (ATUALIZADA com Verificação de Segurança) ---
+// --- Rota de Emissão de NFC-e ---
 app.post('/api/emitir-nfce', async (req, res) => {
     const { total, itens, valorPago, sale_id, formaPagamento } = req.body;
 
@@ -49,27 +50,15 @@ app.post('/api/emitir-nfce', async (req, res) => {
 
     try {
         // --- VERIFICAÇÃO DE SEGURANÇA ---
-        const requiredEnvVars = [
-            'EMIT_RAZAO_SOCIAL', 'EMIT_CNPJ', 'EMIT_UF', 'EMIT_IE', 'EMIT_LOGRADOURO',
-            'EMIT_NUMERO', 'EMIT_BAIRRO', 'EMIT_MUNICIPIO', 'EMIT_CEP', 'EMIT_MUN_CODE',
-            'CERTIFICATE_PASSWORD', 'CSC_ID', 'CSC_TOKEN'
-        ];
-
-        for (const varName of requiredEnvVars) {
-            if (!process.env[varName]) {
-                // Se uma variável estiver em falta, retorna um erro claro
-                throw new Error(`Configuração em falta no servidor: A variável de ambiente '${varName}' não está definida.`);
-            }
-        }
+        const requiredEnvVars = [ 'EMIT_RAZAO_SOCIAL', 'EMIT_CNPJ', 'EMIT_UF', 'EMIT_IE', 'EMIT_LOGRADOURO', 'EMIT_NUMERO', 'EMIT_BAIRRO', 'EMIT_MUNICIPIO', 'EMIT_CEP', 'EMIT_MUN_CODE', 'CERTIFICATE_PASSWORD', 'CSC_ID', 'CSC_TOKEN' ];
+        for (const varName of requiredEnvVars) { if (!process.env[varName]) { throw new Error(`Configuração em falta: A variável de ambiente '${varName}' não está definida.`); } }
         
         const certPath = '/etc/secrets/certificado.pfx';
-        if (!fs.existsSync(certPath)) {
-            throw new Error("Configuração em falta no servidor: O ficheiro do certificado 'certificado.pfx' não foi encontrado.");
-        }
+        if (!fs.existsSync(certPath)) { throw new Error("Configuração em falta: O ficheiro do certificado 'certificado.pfx' não foi encontrado."); }
         const pfx = fs.readFileSync(certPath);
         const senha = process.env.CERTIFICATE_PASSWORD;
 
-        // 1. Configuração da Biblioteca
+        // --- FORMA CORRETA DE INSTANCIAR E CONFIGURAR ---
         const nfe = new NFe();
         nfe.configure({
             "empresa": { "razaoSocial": process.env.EMIT_RAZAO_SOCIAL, "cnpj": process.env.EMIT_CNPJ, "uf": process.env.EMIT_UF, "inscricaoEstadual": process.env.EMIT_IE, "codigoRegimeTributario": 1, "endereco": { "logradouro": process.env.EMIT_LOGRADOURO, "numero": process.env.EMIT_NUMERO, "bairro": process.env.EMIT_BAIRRO, "cidade": process.env.EMIT_MUNICIPIO, "cep": process.env.EMIT_CEP, "codigoCidade": process.env.EMIT_MUN_CODE }},
@@ -94,10 +83,8 @@ app.post('/api/emitir-nfce', async (req, res) => {
     } catch (error) {
         console.error('--- ERRO CRÍTICO AO TENTAR EMITIR NFC-e ---');
         console.error(error); 
-        
         let errorMessage = 'Erro desconhecido. Verifique os logs do servidor.';
         if (error.message) { errorMessage = error.message; } else if (typeof error === 'string') { errorMessage = error; }
-
         await updateSaleStatus('ERRO', null, errorMessage);
         res.status(500).json({ status: 'erro', message: 'Falha crítica no servidor ao tentar emitir NFC-e.', detalhes: errorMessage });
     }
